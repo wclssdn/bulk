@@ -3,7 +3,7 @@
 延迟合并批量执行工具，使用泛型以达到通用化。
 
 ```shell
-go get github.com/wclssdn/bulk_executor
+go get github.com/wclssdn/bulk
 ```
 
 ## 使用场景
