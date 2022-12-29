@@ -20,8 +20,9 @@ type options struct {
 	maxItem uint32
 }
 
-// 批量延迟合并执行器
-type executor[T any] struct {
+// Executor 批量延迟合并执行器
+// 使用 NewExecutor 创建实例
+type Executor[T any] struct {
 	opts *options
 	// 延迟合并元素队列
 	queue chan *T
@@ -65,8 +66,8 @@ func DefaultOptions() []Option {
 // 1. 当接收到执行数量的待执行内容时，由WithMaxItem选项控制多少内容
 // 2. 当超过一定时间未执行时，由WithTimeout选项控制多长时间
 // 3. 关闭执行器时（当服务需要停止/重启等情况时，需要先把队列中的待执行内容执行完毕）
-func NewExecutor[T any](execFunc ExecuteFunc[*T], opts ...Option) *executor[T] {
-	e := &executor[T]{opts: &options{}}
+func NewExecutor[T any](execFunc ExecuteFunc[*T], opts ...Option) *Executor[T] {
+	e := &Executor[T]{opts: &options{}}
 	// 应用默认选项
 	for _, opt := range DefaultOptions() {
 		opt(e.opts)
@@ -85,13 +86,13 @@ func NewExecutor[T any](execFunc ExecuteFunc[*T], opts ...Option) *executor[T] {
 
 // GroupBy 设置任务分组函数
 // 当待执行的任务不可能无差别的批量执行时，则需要执行分组函数，通过此函数对待执行任务进行分组。同组的任务可同一批次批量执行
-func (e *executor[T]) GroupBy(groupFunc GroupFunc[*T]) *executor[T] {
+func (e *Executor[T]) GroupBy(groupFunc GroupFunc[*T]) *Executor[T] {
 	e.groupFunc = groupFunc
 	return e
 }
 
 // Start 开始执行
-func (e *executor[T]) Start() {
+func (e *Executor[T]) Start() {
 	go func() {
 		for {
 			select {
@@ -113,7 +114,7 @@ func (e *executor[T]) Start() {
 }
 
 // 暂存任务
-func (e *executor[T]) tempSaveTask(task *T) string {
+func (e *Executor[T]) tempSaveTask(task *T) string {
 	groupName := "default"
 	if e.groupFunc != nil {
 		groupName = e.groupFunc(task)
@@ -126,7 +127,7 @@ func (e *executor[T]) tempSaveTask(task *T) string {
 }
 
 // 批量执行任务
-func (e *executor[T]) bulkExecute(groupName string) {
+func (e *Executor[T]) bulkExecute(groupName string) {
 	if len(e.tasks[groupName]) == 0 {
 		return
 	}
@@ -138,19 +139,19 @@ func (e *executor[T]) bulkExecute(groupName string) {
 }
 
 // Execute 往执行延迟合并执行队列中写入待执行数据
-func (e *executor[T]) Execute(t *T) {
+func (e *Executor[T]) Execute(t *T) {
 	e.queue <- t
 }
 
 // Stop 结束执行并批量执行完当前所有未执行的任务
 // 执行完毕后才返回，业务需要等待返回后才能认为任务已全部执行完毕
-func (e *executor[T]) Stop() bool {
+func (e *Executor[T]) Stop() bool {
 	close(e.stopSignal)
 	return true
 }
 
 // Wait 等待执行结束（当业务不是常驻进程方式执行时，可通过此方式阻塞程序
-func (e *executor[T]) Wait() {
+func (e *Executor[T]) Wait() {
 	select {
 	case <-e.stopSignal:
 	}
