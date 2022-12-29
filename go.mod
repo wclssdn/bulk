@@ -1,3 +1,3 @@
-module github.com/wclssdn/bulk_executor
+module github.com/wclssdn/bulk
 
 go 1.19
