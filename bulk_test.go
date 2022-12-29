@@ -3,6 +3,7 @@ package bulk
 import (
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -55,6 +56,38 @@ func bulkExecute(tasks []*testTask) {
 	fmt.Println("=", result)
 	// 模拟任务执行时间较长，如果观察到有多个任务在同一秒执行，则证明可以并行处理
 	time.Sleep(time.Millisecond * time.Duration(rand.Intn(1000)))
+}
+
+var totalTasks int64 = 0
+
+// 不输出执行
+func bulkExecuteWithoutPrint(tasks []*testTask) {
+	if len(tasks) == 0 {
+		// should never happen
+		return
+	}
+	op := tasks[0].op
+	l := len(tasks)
+	// 此函数会并行执行，如果存在竟态操作，需要确保不冲突
+	atomic.AddInt64(&totalTasks, int64(l))
+
+	var result int
+	for i, task := range tasks {
+		if i == 0 {
+			result = task.i
+			continue
+		}
+		switch op {
+		case "+":
+			result += task.i
+		case "*":
+			result *= task.i
+		case "-":
+			result -= task.i
+		case "/":
+			result /= task.i
+		}
+	}
 }
 
 func TestExecutor(t *testing.T) {
@@ -125,4 +158,40 @@ func TestGroupExecutorLongTime(t *testing.T) {
 	}
 
 	executor.Wait()
+}
+
+func TestExecutorRace(t *testing.T) {
+	executor := NewExecutor(bulkExecuteWithoutPrint, WithMaxItem(2), WithTimeout(time.Microsecond))
+	executor.Start()
+	time.AfterFunc(time.Second*3, func() {
+		stopped := executor.Stop()
+		fmt.Println("TestExecutorRace stopped:", stopped)
+	})
+	go func() {
+		for i := 1; i <= 10000; i++ {
+			executor.Execute(&testTask{
+				i:  i,
+				op: "+",
+			})
+		}
+	}()
+	go func() {
+		for i := 1; i <= 10000; i++ {
+			executor.Execute(&testTask{
+				i:  i,
+				op: "+",
+			})
+		}
+	}()
+	go func() {
+		for i := 1; i <= 10000; i++ {
+			executor.Execute(&testTask{
+				i:  i,
+				op: "+",
+			})
+		}
+	}()
+
+	executor.Wait()
+	fmt.Println("total: ", totalTasks)
 }
