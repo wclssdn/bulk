@@ -29,7 +29,8 @@ type Executor[T any] struct {
 	// 执行循环计时器
 	ticker *time.Ticker
 	// 停止执行
-	stopSignal chan struct{}
+	stopSignal    chan struct{}
+	stoppedSignal chan struct{}
 	// 分组待执行任务数组 此数组满足一定条件就会合并执行
 	tasks map[string][]*T
 	// 分组函数
@@ -79,6 +80,7 @@ func NewExecutor[T any](execFunc ExecuteFunc[*T], opts ...Option) *Executor[T] {
 	e.ticker = time.NewTicker(e.opts.timeout)
 	e.queue = make(chan *T, e.opts.maxItem*2)
 	e.stopSignal = make(chan struct{})
+	e.stoppedSignal = make(chan struct{})
 	e.executeFunc = execFunc
 	e.tasks = make(map[string][]*T)
 	return e
@@ -94,6 +96,7 @@ func (e *Executor[T]) GroupBy(groupFunc GroupFunc[*T]) *Executor[T] {
 // Start 开始执行
 func (e *Executor[T]) Start() {
 	go func() {
+	loop:
 		for {
 			select {
 			case task := <-e.queue:
@@ -102,14 +105,31 @@ func (e *Executor[T]) Start() {
 					e.bulkExecute(groupName)
 				}
 			case <-e.ticker.C:
+				// 如果分组过多，会影响执行效率
+				cleanGroup := len(e.tasks) > 1000
 				for groupName := range e.tasks {
 					if len(e.tasks[groupName]) == 0 {
+						if cleanGroup {
+							delete(e.tasks, groupName)
+						}
 						continue
 					}
 					e.bulkExecute(groupName)
 				}
+			case <-e.stopSignal:
+				e.ticker.Stop()
+				break loop
 			}
 		}
+		// 把所有的任务执行一遍
+		for groupName := range e.tasks {
+			if len(e.tasks[groupName]) == 0 {
+				continue
+			}
+			e.bulkExecute(groupName)
+		}
+		// 通知执行完毕
+		close(e.stoppedSignal)
 	}()
 }
 
@@ -146,13 +166,14 @@ func (e *Executor[T]) Execute(t *T) {
 // Stop 结束执行并批量执行完当前所有未执行的任务
 // 执行完毕后才返回，业务需要等待返回后才能认为任务已全部执行完毕
 func (e *Executor[T]) Stop() bool {
+	// 通知需要停止
 	close(e.stopSignal)
+	// 等待停止完毕
+	<-e.stoppedSignal
 	return true
 }
 
-// Wait 等待执行结束（当业务不是常驻进程方式执行时，可通过此方式阻塞程序
+// Wait 等待执行结束
 func (e *Executor[T]) Wait() {
-	select {
-	case <-e.stopSignal:
-	}
+	<-e.stoppedSignal
 }
